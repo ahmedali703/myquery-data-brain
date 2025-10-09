@@ -1,4 +1,4 @@
--- Ajax Callback in Oracle APEX
+-- AJAX callback Process in Oracle APEX Page
 -- DASH_PLAN
 
 DECLARE

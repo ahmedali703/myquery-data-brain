@@ -216,24 +216,15 @@
     // Render KPIs with hover effects
     let kpisData = [];
     try {
-      // First check if kpis is in meta directly
       if (meta.kpis) {
         const kpisJson = typeof meta.kpis === 'string' ? JSON.parse(meta.kpis) : meta.kpis;
         kpisData = kpisJson?.kpis || [];
-      }
-      // Also check in visual_options if this is a KPI widget
-      else if (meta.visual_options && meta.chart_type === 'KPI') {
+      } else if (meta.visual_options && meta.chart_type === 'KPI') {
         const visualOpts = typeof meta.visual_options === 'string' ? JSON.parse(meta.visual_options) : meta.visual_options;
         if (visualOpts && visualOpts.kpis) {
           kpisData = Array.isArray(visualOpts.kpis) ? visualOpts.kpis : [];
         }
       }
-
-      console.log('KPI Debug - meta:', meta);
-      console.log('KPI Debug - kpisData:', kpisData);
-      console.log('KPI Debug - meta.kpis:', meta.kpis);
-      console.log('KPI Debug - meta.visual_options:', meta.visual_options);
-      console.log('KPI Debug - meta.chart_type:', meta.chart_type);
     } catch (e) { console.warn('KPI parsing error:', e); }
     
     let kpiHtml = '';
@@ -312,51 +303,34 @@
     let chartData = null;
     let insightsData = [];
     
-    console.log('Chart rendering - meta:', meta);
-    
     try {
-      // First try to get chart data from visual_options if it's a string
-      if (meta.visual_options) {
-        const visualOpts = typeof meta.visual_options === 'string' ? JSON.parse(meta.visual_options) : meta.visual_options;
-        console.log('Chart Debug - visual_options:', visualOpts);
-        console.log('Chart Debug - chart_type:', meta.chart_type);
-        console.log('Chart Debug - has chartData:', !!visualOpts.chartData);
-        console.log('Chart Debug - has labels:', !!visualOpts.labels);
-        console.log('Chart Debug - has title:', !!visualOpts.title);
-        
-        // Handle chart data (might be nested under chartData property)
-        if (visualOpts.chartData) {
-          chartData = typeof visualOpts.chartData === 'string' ? JSON.parse(visualOpts.chartData) : visualOpts.chartData;
-        } else if (visualOpts.labels && visualOpts.data) {
-          // Direct chart data structure
-          chartData = visualOpts;
-        } else if (visualOpts.title && visualOpts.subtitle) {
-          // Chart data is stored directly in visual_options
-          chartData = visualOpts;
-        }
-        
-        // Handle insights if available
-        if (visualOpts.insights) {
-          insightsData = Array.isArray(visualOpts.insights) ? 
-            visualOpts.insights : 
-            (typeof visualOpts.insights === 'string' ? JSON.parse(visualOpts.insights) : []);
-        }
-      }
-      
-      // Fallback to direct properties if not found in visual_options
-      if (!chartData && meta.chartData) {
+      if (meta.chartData) {
         chartData = typeof meta.chartData === 'string' ? JSON.parse(meta.chartData) : meta.chartData;
       }
-      
-      if (!insightsData.length && meta.chartInsights) {
-        insightsData = Array.isArray(meta.chartInsights) ? 
-          meta.chartInsights : 
-          (typeof meta.chartInsights === 'string' ? JSON.parse(meta.chartInsights) : []);
+
+      if (!chartData && meta.visual_options) {
+        const visualOpts = typeof meta.visual_options === 'string' ? JSON.parse(meta.visual_options) : meta.visual_options;
+        if (visualOpts) {
+          if (visualOpts.chartData) {
+            chartData = typeof visualOpts.chartData === 'string' ? JSON.parse(visualOpts.chartData) : visualOpts.chartData;
+          } else if (visualOpts.labels && visualOpts.data) {
+            chartData = visualOpts;
+          }
+
+          if (visualOpts.insights) {
+            insightsData = Array.isArray(visualOpts.insights)
+              ? visualOpts.insights
+              : (typeof visualOpts.insights === 'string' ? JSON.parse(visualOpts.insights) : []);
+          }
+        }
       }
-      
-      console.log('Parsed chart data:', chartData);
-      console.log('Parsed insights data:', insightsData);
-      
+
+      if (!insightsData.length && meta.chartInsights) {
+        insightsData = Array.isArray(meta.chartInsights)
+          ? meta.chartInsights
+          : (typeof meta.chartInsights === 'string' ? JSON.parse(meta.chartInsights) : []);
+      }
+
     } catch (e) {
       console.warn('Chart data parsing error:', e);
       console.log('Raw meta:', meta);
@@ -375,6 +349,7 @@
                          chartData.data.length > 0;
                          
     if (!hasValidChart) {
+      console.warn('No valid chart data available for dashboard chart rendering.');
       console.warn('No valid chart data available. ChartData:', chartData);
       // Show placeholder chart section
       let chartContainer = sel('#mqChart');
@@ -387,6 +362,8 @@
       }
       chartContainer.innerHTML = `
         <div style="color: #6b7280; font: 14px/1.5 system-ui;">
+          <p>Chart data was not returned for this dashboard yet.</p>
+          <p style="font-size: 12px;">Run the dashboard generation again once the SQL query produces results.</p>
           <p>Chart data validation failed</p>
           <p style="font-size: 12px;">Debug Info:</p>
           <pre style="font-size: 10px; text-align: left; background: #f0f0f0; padding: 8px; border-radius: 4px; margin: 8px 0;">
@@ -416,6 +393,7 @@ parsed chartData: ${chartData ? JSON.stringify(chartData, null, 2).substring(0, 
       region.parentElement?.insertBefore(chartContainer, region);
     }
 
+    const insightsList = insightsData.length ? insightsData : [];
     const insightsList = insightsData.length ? insightsData : ['No insights available yet.'];
 
     chartContainer.innerHTML = `
@@ -443,8 +421,22 @@ parsed chartData: ${chartData ? JSON.stringify(chartData, null, 2).substring(0, 
     // Create Chart.js chart
     const canvas = sel('#mqChartCanvas');
     if (canvas && chartData.labels && chartData.data) {
+      const rawType = String(chartData.type || chartData.chart_type || '').toLowerCase();
+      const chartType = ({
+        bar: 'bar',
+        column: 'bar',
+        line: 'line',
+        area: 'line',
+        pie: 'pie',
+        donut: 'doughnut',
+        doughnut: 'doughnut',
+        radar: 'radar',
+        polararea: 'polarArea',
+        scatter: 'scatter',
+        bubble: 'bubble'
+      })[rawType] || 'bar';
       new Chart(canvas, {
-        type: 'bar',
+        type: chartType,
         data: {
           labels: chartData.labels,
           datasets: [{

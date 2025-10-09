@@ -270,7 +270,7 @@ END plan_layout_and_blocks;
       'If uncertain, choose "TABLE".'||CHR(10)||
       'SQL:'||CHR(10)||DBMS_LOB.SUBSTR(p_sql, 32000);
 
-    l_body := '{"model":"gpt-5-2025-08-07",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"json_object"},'||
               '"temperature":0,'||
               '"input":"'||json_escape(l_prompt)||'"}';
@@ -316,7 +316,7 @@ END plan_layout_and_blocks;
       'Schema: '||NVL(p_schema, 'default')||CHR(10)||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"temperature":0.2,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
 
@@ -458,7 +458,7 @@ END plan_layout_and_blocks;
       '- KPI titles should be 2-4 words max '||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"json_object"},'||
               '"temperature":0.2,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
@@ -537,7 +537,7 @@ END plan_layout_and_blocks;
       'Keep it to 2-3 sentences, professional and informative.'||CHR(10)||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"text"},'||
               '"temperature":0.3,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
@@ -584,7 +584,7 @@ END plan_layout_and_blocks;
       '- If including SQL examples, ALWAYS prefix table names with '||p_schema||' '||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"json_object"},'||
               '"temperature":0.3,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
@@ -740,7 +740,7 @@ END plan_layout_and_blocks;
       '- For time series, format dates appropriately '||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"json_object"},'||
               '"temperature":0.2,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
@@ -788,7 +788,7 @@ END plan_layout_and_blocks;
   p_question      IN  VARCHAR2,
   p_dashboard_id  OUT NUMBER,
   p_reason_out    OUT CLOB,
-  p_model         IN  VARCHAR2  DEFAULT 'gpt-5-2025-08-07',
+  p_model         IN  VARCHAR2  DEFAULT 'gpt-4o-mini',
   p_max_widgets   IN  PLS_INTEGER DEFAULT 6
 ) IS
   l_owner     VARCHAR2(128) := UPPER(p_owner);

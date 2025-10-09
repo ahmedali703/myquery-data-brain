@@ -333,6 +333,7 @@
 
     } catch (e) {
       console.warn('Chart data parsing error:', e);
+      console.log('Raw meta:', meta);
       chartData = null;
       insightsData = [];
     }
@@ -349,6 +350,8 @@
                          
     if (!hasValidChart) {
       console.warn('No valid chart data available for dashboard chart rendering.');
+      console.warn('No valid chart data available. ChartData:', chartData);
+      // Show placeholder chart section
       let chartContainer = sel('#mqChart');
       if (!chartContainer) {
         chartContainer = $d.createElement('section');
@@ -361,6 +364,20 @@
         <div style="color: #6b7280; font: 14px/1.5 system-ui;">
           <p>Chart data was not returned for this dashboard yet.</p>
           <p style="font-size: 12px;">Run the dashboard generation again once the SQL query produces results.</p>
+          <p>Chart data validation failed</p>
+          <p style="font-size: 12px;">Debug Info:</p>
+          <pre style="font-size: 10px; text-align: left; background: #f0f0f0; padding: 8px; border-radius: 4px; margin: 8px 0;">
+chartData exists: ${!!meta.chartData}
+chartData type: ${typeof meta.chartData}
+chartData content: ${JSON.stringify(meta.chartData, null, 2).substring(0, 200)}...
+
+insights exists: ${!!meta.chartInsights}
+insights type: ${typeof meta.chartInsights}
+insights content: ${JSON.stringify(meta.chartInsights, null, 2).substring(0, 200)}...
+
+parsed chartData: ${chartData ? JSON.stringify(chartData, null, 2).substring(0, 200) : 'null'}
+          </pre>
+          <p style="font-size: 12px;">Ensure the dashboard SQL returns numeric data, then run generation again.</p>
         </div>
       `;
       return;
@@ -377,6 +394,7 @@
     }
 
     const insightsList = insightsData.length ? insightsData : [];
+    const insightsList = insightsData.length ? insightsData : ['No insights available yet.'];
 
     chartContainer.innerHTML = `
       <div style="flex: 1; padding: 20px; background: white; border-radius: 12px 0 0 12px;">

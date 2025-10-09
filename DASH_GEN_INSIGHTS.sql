@@ -100,7 +100,7 @@ BEGIN
         'Make insights specific, actionable, and business-focused.'||CHR(10)||
         'Question: '||v_question;
 
-      l_body := '{"model":"gpt-4-turbo-preview",'||
+      l_body := '{"model":"gpt-4o-mini",'||
                 '"response_format":{"type":"json_object"},'||
                 '"temperature":0.2,'||
                 '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';

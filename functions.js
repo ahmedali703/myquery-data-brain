@@ -12,8 +12,55 @@
   const $d = document;
   const sel = (q, el = $d) => el.querySelector(q);
 
+  function normalizeItemToken(token) {
+    if (!token) { return null; }
+    let t = token.trim();
+    if (!t) { return null; }
+    if (!t.startsWith("#")) { t = `#${t}`; }
+    if (!t.endsWith("#")) { t = `${t}#`; }
+    return t;
+  }
+
   function callProcess(name, opts) {
-    return apex.server.process(name, opts || {}, { dataType: (opts && opts.dataType) || "json" });
+    const options = {};
+    const payload = { ...(opts || {}) };
+
+    if (payload.dataType) {
+      options.dataType = payload.dataType;
+      delete payload.dataType;
+    } else {
+      options.dataType = "json";
+    }
+
+    if (payload.pageItems) {
+      const pageItems = Array.isArray(payload.pageItems)
+        ? payload.pageItems
+        : String(payload.pageItems).split(",");
+      const formatted = pageItems
+        .map(normalizeItemToken)
+        .filter(Boolean)
+        .join(",");
+      if (formatted) {
+        options.pageItems = formatted;
+      }
+      delete payload.pageItems;
+    }
+
+    if (payload.x01 === undefined && window.apex && typeof apex.item === 'function') {
+      try {
+        const dashItem = apex.item(ITEM_DASH_ID);
+        if (dashItem) {
+          const dashValue = dashItem.getValue();
+          if (dashValue !== null && dashValue !== undefined && String(dashValue).trim() !== '') {
+            payload.x01 = dashValue;
+          }
+        }
+      } catch (e) {
+        console.debug('Unable to attach dashboard id to request payload', e);
+      }
+    }
+
+    return apex.server.process(name, payload, options);
   }
 
   // Progress HUD
@@ -85,7 +132,7 @@
     // Get AI-generated content from GET_DASH_META - NO FALLBACKS, NO STATIC VALUES
     let meta = null;
     try {
-      const res = await callProcess('GET_DASH_META', { pageItems: `#${ITEM_DASH_ID}` });
+      const res = await callProcess('GET_DASH_META', { pageItems: [ITEM_DASH_ID] });
       if (res && res.ok) {
         meta = res; // Use ALL data from GET_DASH_META (title, subtitle, insights)
         // Override title with user's question for header/sidebar consistency
@@ -313,29 +360,8 @@
     } catch (e) {
       console.warn('Chart data parsing error:', e);
       console.log('Raw meta:', meta);
-      
-      // Fallback data
-      chartData = {
-        title: meta.title || "Sample Chart",
-        subtitle: meta.subtitle || "Sample data for demonstration",
-        labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-        data: [120, 190, 300, 500, 200, 300],
-        color: "#3b82f6"
-      };
-      
-      insightsData = [
-        "This is sample insight data",
-        "The chart shows sample data points",
-        "Peak values indicate trends",
-        "Data is for demonstration purposes",
-        "Check console for detailed error info"
-      ];
-      
-      if (e instanceof SyntaxError) {
-        console.error('JSON parsing error in chart data');
-      } else {
-        console.error('Error processing chart data:', e);
-      }
+      chartData = null;
+      insightsData = [];
     }
 
     // More detailed validation with better error reporting
@@ -348,17 +374,6 @@
                          Array.isArray(chartData.data) && 
                          chartData.data.length > 0;
                          
-    if (!hasValidChart) {
-      console.warn('No valid chart data available. ChartData:', chartData);
-      // Ensure we have at least some data to display
-      chartData = chartData || {};
-      chartData.labels = chartData.labels || ["Jan", "Feb", "Mar"];
-      chartData.data = chartData.data || [100, 200, 150];
-      chartData.title = chartData.title || "Sample Chart";
-      chartData.subtitle = chartData.subtitle || "Sample data";
-      chartData.color = chartData.color || "#3b82f6";
-    }
-
     if (!hasValidChart) {
       console.warn('No valid chart data available. ChartData:', chartData);
       // Show placeholder chart section
@@ -383,8 +398,9 @@ insights exists: ${!!meta.chartInsights}
 insights type: ${typeof meta.chartInsights}
 insights content: ${JSON.stringify(meta.chartInsights, null, 2).substring(0, 200)}...
 
-parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
+parsed chartData: ${chartData ? JSON.stringify(chartData, null, 2).substring(0, 200) : 'null'}
           </pre>
+          <p style="font-size: 12px;">Ensure the dashboard SQL returns numeric data, then run generation again.</p>
         </div>
       `;
       return;
@@ -400,6 +416,8 @@ parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
       region.parentElement?.insertBefore(chartContainer, region);
     }
 
+    const insightsList = insightsData.length ? insightsData : ['No insights available yet.'];
+
     chartContainer.innerHTML = `
       <div style="flex: 1; padding: 20px; background: white; border-radius: 12px 0 0 12px;">
         <h3 style="margin: 0 0 4px; font: 600 18px/1.4 system-ui;">${chartData.title || 'Chart'}</h3>
@@ -412,7 +430,7 @@ parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
         <h3 style="margin: 0 0 4px; font: 600 18px/1.4 system-ui;">Key Insights</h3>
         <p style="margin: 0 0 16px; font: 14px/1.4 system-ui; color: #6b7280;">${chartData.title || ''}</p>
         <ul style="margin: 0; padding: 0; list-style: none;">
-          ${insightsData.map(insight => `
+          ${insightsList.map(insight => `
             <li style="margin: 0 0 12px; padding: 0; font: 14px/1.5 system-ui; color: #374151; position: relative; padding-left: 8px;">
               <span style="position: absolute; left: -8px; top: 0; color: #6b7280;">•</span>
               ${insight}
@@ -474,7 +492,7 @@ parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
     // 1) Plan
     try {
       setStepActive('plan', 'Planning layout and blocks…');
-      const rawPlan = await callProcess('DASH_PLAN', { pageItems: `#${ITEM_Q},#P0_DATABASE_SCHEMA`, dataType: 'text' });
+      const rawPlan = await callProcess('DASH_PLAN', { pageItems: [ITEM_Q, 'P0_DATABASE_SCHEMA'], dataType: 'text' });
       let planRes = rawPlan;
       if (typeof rawPlan === 'string') { try { planRes = JSON.parse(rawPlan); } catch { throw new Error('Invalid JSON from server (PLAN).'); } }
       if (!planRes || planRes.ok !== true) { throw new Error((planRes && (planRes.error||planRes.title)) || 'Planner failed.'); }
@@ -485,47 +503,47 @@ parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
     let dashId = null;
     try {
       setStepActive('create', 'Creating dashboard and widgets…');
-      const createRes = await callProcess('DASH_CREATE_BLOCKS', { pageItems: `#${ITEM_PLAN_JSON},#${ITEM_Q}` });
+      const createRes = await callProcess('DASH_CREATE_BLOCKS', { pageItems: [ITEM_PLAN_JSON, ITEM_Q] });
       if (!createRes || createRes.ok !== true) throw new Error((createRes && createRes.error) || 'Create failed.');
       dashId = createRes.dashboardId || apex.item(ITEM_DASH_ID).getValue();
       if (!dashId) throw new Error('No dashboardId returned.');
-      apex.item(ITEM_DASH_ID).setValue(String(dashId));
+      apex.item(ITEM_DASH_ID).setValue(String(dashId), null, true);
     } catch (e) { apex.message.showErrors([{type:'error',location:'page',message:e.message}]); finishProgress(false, 'Failed at Creating'); return; }
 
     // 3) KPIs (AI-generated KPI blocks)
     try {
       setStepActive('kpis', 'AI generating KPI metrics…');
-     await callProcess('DASH_GEN_KPIS',   { pageItems: `#${ITEM_DASH_ID},#P0_DATABASE_SCHEMA` });
+     await callProcess('DASH_GEN_KPIS',   { pageItems: [ITEM_DASH_ID, 'P0_DATABASE_SCHEMA'] });
     } catch(e) { console.warn('KPIS warn', e); }
 
     // 4) Insights (aggregated into single Key Insights widget)
     try {
       setStepActive('insights', 'AI generating insights from data…');
-      await callProcess('DASH_GEN_INSIGHTS', { pageItems: `#${ITEM_DASH_ID},#P0_DATABASE_SCHEMA` });
+      await callProcess('DASH_GEN_INSIGHTS', { pageItems: [ITEM_DASH_ID, 'P0_DATABASE_SCHEMA'] });
     } catch(e) { console.warn('INSIGHTS warn', e); }
 
     // 5) Summary (AI-generated small description under title)
     try {
       setStepActive('summary', 'AI generating description…');
-      await callProcess('DASH_GEN_SUMMARY', { pageItems: `#${ITEM_DASH_ID},#P0_DATABASE_SCHEMA` });
+      await callProcess('DASH_GEN_SUMMARY', { pageItems: [ITEM_DASH_ID, 'P0_DATABASE_SCHEMA'] });
     } catch(e) { console.warn('SUMMARY warn', e); }
 
     // 6) Overview (AI-generated overview text for Overview section)
     try {
       setStepActive('overview', 'AI generating overview…');
-      await callProcess('DASH_GEN_OVERVIEW', { pageItems: `#${ITEM_DASH_ID},#P0_DATABASE_SCHEMA` });
+      await callProcess('DASH_GEN_OVERVIEW', { pageItems: [ITEM_DASH_ID, 'P0_DATABASE_SCHEMA'] });
     } catch(e) { console.warn('OVERVIEW warn', e); }
 
     // 7) Chart (AI-generated chart with insights)
     try {
       setStepActive('chart', 'AI creating chart with insights…');
-      await callProcess('DASH_GEN_CHART', { pageItems: `#${ITEM_DASH_ID},#P0_DATABASE_SCHEMA,#${ITEM_Q}` });
+      await callProcess('DASH_GEN_CHART', { pageItems: [ITEM_DASH_ID, 'P0_DATABASE_SCHEMA', ITEM_Q] });
     } catch(e) { console.warn('CHART warn', e); }
 
     // 8) Finalize
     try {
       setStepActive('final', 'Finalizing dashboard…');
-      await callProcess('DASH_FINALIZE', { pageItems: `#${ITEM_DASH_ID},#P0_DATABASE_SCHEMA` });
+      await callProcess('DASH_FINALIZE', { pageItems: [ITEM_DASH_ID, 'P0_DATABASE_SCHEMA'] });
     } catch(e) { console.warn('FINAL warn', e); }
 
     // Clear placeholder and render all blocks after ALL AI generation is complete

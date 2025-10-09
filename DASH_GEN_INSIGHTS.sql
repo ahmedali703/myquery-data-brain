@@ -4,7 +4,7 @@
 
 
 DECLARE
-  v_dash_id        NUMBER := TO_NUMBER(:P3_DASH_ID);
+  v_dash_id        NUMBER := TO_NUMBER(NVL(NULLIF(:P3_DASH_ID, ''), NULLIF(APEX_APPLICATION.G_X01, '')));
   v_done           NUMBER := 0;
   v_total          NUMBER := 0;
   l_out            CLOB;
@@ -100,7 +100,7 @@ BEGIN
         'Make insights specific, actionable, and business-focused.'||CHR(10)||
         'Question: '||v_question;
 
-      l_body := '{"model":"gpt-4-turbo-preview",'||
+      l_body := '{"model":"gpt-4o-mini",'||
                 '"response_format":{"type":"json_object"},'||
                 '"temperature":0.2,'||
                 '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';

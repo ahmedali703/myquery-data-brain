@@ -2,7 +2,7 @@
 -- Process Name: DASH_GEN_OVERVIEW
 
 DECLARE
-  v_dash_id     NUMBER := TO_NUMBER(:P3_DASH_ID);
+  v_dash_id     NUMBER := TO_NUMBER(NVL(NULLIF(:P3_DASH_ID, ''), NULLIF(APEX_APPLICATION.G_X01, '')));
   v_question    VARCHAR2(4000) := :P3_QUESTION;
   v_overview    CLOB;
   v_overview_id NUMBER;

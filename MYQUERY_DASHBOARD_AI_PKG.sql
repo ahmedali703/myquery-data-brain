@@ -28,7 +28,8 @@ create or replace PACKAGE myquery_dashboard_ai_pkg AS
   -- Generate chart with insights
   PROCEDURE generate_chart_with_insights(
     p_question   IN  VARCHAR2,
-    p_chart_data OUT CLOB,
+    p_sql_query  IN  CLOB,
+    p_chart_data IN  CLOB,
     p_insights   OUT CLOB,
     p_schema     IN  VARCHAR2 DEFAULT NULL
   );
@@ -270,7 +271,7 @@ END plan_layout_and_blocks;
       'If uncertain, choose "TABLE".'||CHR(10)||
       'SQL:'||CHR(10)||DBMS_LOB.SUBSTR(p_sql, 32000);
 
-    l_body := '{"model":"gpt-5-2025-08-07",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"json_object"},'||
               '"temperature":0,'||
               '"input":"'||json_escape(l_prompt)||'"}';
@@ -316,7 +317,7 @@ END plan_layout_and_blocks;
       'Schema: '||NVL(p_schema, 'default')||CHR(10)||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"temperature":0.2,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
 
@@ -458,7 +459,7 @@ END plan_layout_and_blocks;
       '- KPI titles should be 2-4 words max '||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"json_object"},'||
               '"temperature":0.2,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
@@ -537,7 +538,7 @@ END plan_layout_and_blocks;
       'Keep it to 2-3 sentences, professional and informative.'||CHR(10)||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"text"},'||
               '"temperature":0.3,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
@@ -557,128 +558,137 @@ END plan_layout_and_blocks;
 
     p_overview := NVL(v_txt, 'AI-generated overview will appear here once the dashboard is fully loaded.');
   END generate_overview_text;
-  PROCEDURE generate_chart_with_insights(
-    p_question     IN  VARCHAR2,
-    p_chart_data   OUT CLOB,
-    p_insights     OUT CLOB,
-    p_schema       IN  VARCHAR2 DEFAULT NULL
-  ) IS
-    l_prompt CLOB;
-    l_body   CLOB;
-    l_resp   CLOB;
-    v_txt    CLOB;
-    l_schema CLOB := get_schema_summary(p_schema, 5000);
+PROCEDURE generate_chart_with_insights(
+  p_question   IN  VARCHAR2,
+  p_sql_query  IN  CLOB,
+  p_chart_data IN  CLOB,
+  p_insights   OUT CLOB,
+  p_schema     IN  VARCHAR2 DEFAULT NULL
+) IS
+  l_prompt      CLOB;
+  l_body        CLOB;
+  l_resp        CLOB;
+  v_txt         CLOB;
+  l_insights    CLOB;
+  l_chart_title VARCHAR2(4000);
+  l_chart_sub   VARCHAR2(4000);
+
+  FUNCTION has_json_path(p_json CLOB, p_path VARCHAR2) RETURN BOOLEAN IS
+    l_flag NUMBER;
   BEGIN
-    l_prompt :=
-      'You are a BI analyst. Generate a bar chart with insights for this dashboard question. '||
-      'SCHEMA INFORMATION: '||DBMS_LOB.SUBSTR(l_schema, 4000)||CHR(10)||CHR(10)||
-      'IMPORTANT: When generating SQL queries, always prefix table names with '||p_schema||' (e.g., '||p_schema||'.table_name)'||CHR(10)||CHR(10)||
-      'Return JSON only: {"chart":{"title":"Chart Title","subtitle":"Chart description","labels":["Jan","Feb","Mar"],"data":[100,200,150],"color":"#3b82f6"},"insights":["insight1","insight2","insight3","insight4","insight5"]}. '||
-      'Requirements: '||
-      '- Chart title should be relevant to the question (2-6 words) '||
-      '- Chart subtitle should explain what it shows (1 sentence) '||
-      '- 6-12 data points with realistic values '||
-      '- Labels should be relevant (months, categories, etc.) '||
-      '- 5 specific insights about the data trends '||
-      '- Use appropriate color (#3b82f6, #059669, #dc2626, #7c3aed, #ea580c) '||
-      '- If including SQL examples, ALWAYS prefix table names with '||p_schema||' '||
-      'Question: '||p_question;
-
-    l_body := '{"model":"gpt-4-turbo-preview",'||
-              '"response_format":{"type":"json_object"},'||
-              '"temperature":0.3,'||
-              '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
-
-    set_json_headers;
-    l_resp := APEX_WEB_SERVICE.make_rest_request(
-                p_url                  => 'https://api.openai.com/v1/chat/completions',
-                p_http_method          => 'POST',
-                p_body                 => l_body,
-                p_credential_static_id => 'credentials_for_ai_services');
-
-    IF APEX_WEB_SERVICE.g_status_code <> 200 THEN
-      p_chart_data := '{"title":"Chart Error","subtitle":"API call failed with status ' || APEX_WEB_SERVICE.g_status_code || '","labels":["Error"],"data":[1],"color":"#dc2626"}';
-      p_insights := '["API call failed with HTTP status: ' || APEX_WEB_SERVICE.g_status_code || '","Response: ' || DBMS_LOB.SUBSTR(l_resp, 100, 1) || '"]';
-      RETURN;
+    IF p_json IS NULL THEN
+      RETURN FALSE;
     END IF;
 
-    -- First, get the raw response content
-    v_txt := JSON_VALUE(l_resp, '$.choices[0].message.content' RETURNING CLOB);
-    
-    -- Debug the raw response
-    DBMS_OUTPUT.PUT_LINE('Raw AI Response: ' || DBMS_LOB.SUBSTR(v_txt, 4000, 1));
-    
-    -- Check if we got any content
-    IF v_txt IS NULL THEN
-      DBMS_OUTPUT.PUT_LINE('No content in AI response');
-      p_chart_data := '{"title":"No Data","subtitle":"No chart data was generated","labels":["Error"],"data":[1],"color":"#dc2626"}';
-      p_insights := '["No insights were generated. Please try again or check the input question."]';
-      RETURN;
+    SELECT CASE WHEN JSON_EXISTS(p_json, p_path) THEN 1 ELSE 0 END
+      INTO l_flag
+      FROM dual;
+
+    RETURN l_flag = 1;
+  EXCEPTION
+    WHEN OTHERS THEN
+      RETURN FALSE;
+  END;
+
+  FUNCTION ensure_array(p_json CLOB) RETURN CLOB IS
+    l_json CLOB := p_json;
+    l_has  NUMBER := 0;
+  BEGIN
+    IF l_json IS NULL THEN
+      RETURN NULL;
     END IF;
 
-    -- Extract chart data and insights from AI response
-    -- First try to parse as JSON object
     BEGIN
-      -- Extract chart and insights directly from the response
-      p_chart_data := JSON_QUERY(v_txt, '$.chart' ERROR ON ERROR NULL ON EMPTY);
-      p_insights := JSON_QUERY(v_txt, '$.insights' ERROR ON ERROR NULL ON EMPTY);
-      
-      -- Debug extracted content
-      DBMS_OUTPUT.PUT_LINE('Extracted chart_data: ' || DBMS_LOB.SUBSTR(p_chart_data, 1000, 1));
-      DBMS_OUTPUT.PUT_LINE('Extracted insights: ' || DBMS_LOB.SUBSTR(p_insights, 1000, 1));
-      
-      -- If either is null, try to parse the entire response as JSON directly
-      IF p_chart_data IS NULL OR p_insights IS NULL THEN
-        -- If the response is already a JSON object with chart/insights at root
-        IF JSON_EXISTS(v_txt, '$.chart') THEN
-          p_chart_data := v_txt;
-          p_insights := v_txt;
-        ELSE
-          -- Try to fix common JSON formatting issues
-          v_txt := REGEXP_REPLACE(v_txt, '^[^{]*', ''); -- Remove any non-JSON prefix
-          v_txt := REGEXP_REPLACE(v_txt, '[^}]*$', '');  -- Remove any non-JSON suffix
-          
-          -- Try to parse again
-          IF JSON_EXISTS(v_txt, '$') THEN
-            p_chart_data := JSON_QUERY(v_txt, '$.chart' ERROR ON ERROR NULL ON EMPTY);
-            p_insights := JSON_QUERY(v_txt, '$.insights' ERROR ON ERROR NULL ON EMPTY);
-          END IF;
-        END IF;
-      END IF;
-      
+      SELECT CASE WHEN JSON_EXISTS(l_json, '$[*]') THEN 1 ELSE 0 END
+        INTO l_has
+        FROM dual;
     EXCEPTION
       WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('JSON parsing error: ' || SQLERRM);
-        -- Fall through to use fallback data
+        l_has := 0;
     END;
 
-    -- Provide fallback data if AI didn't generate proper content
-    IF p_chart_data IS NULL OR p_chart_data = '{}' OR LENGTH(p_chart_data) < 10 THEN
-      p_chart_data := '{"title":"' || SUBSTR(REPLACE(p_question, '"', ''), 1, 50) || '",' ||
-                     '"subtitle":"Sample data for demonstration",' ||
-                     '"labels":["Jan","Feb","Mar","Apr","May","Jun"],' ||
-                     '"data":[120,190,300,500,200,300],' ||
-                     '"color":"#3b82f6"}';
+    IF l_has = 1 THEN
+      RETURN l_json;
     END IF;
-    
-    IF p_insights IS NULL OR p_insights = '[]' OR LENGTH(p_insights) < 5 THEN
-      p_insights := '["This is a sample insight about the data trends",' ||
-                   '"The chart shows variation across different periods",' ||
-                   '"Peak values occur in the middle of the timeframe",' ||
-                   '"Data suggests seasonal patterns in the metrics",' ||
-                   '"Further analysis could reveal underlying factors"]';
-    END IF;
-    
-    -- Ensure chart_data is a valid JSON object
-    IF p_chart_data IS NOT NULL AND NOT JSON_EXISTS(p_chart_data, '$') THEN
-      p_chart_data := '{"title":"Data Format Error","subtitle":"Invalid chart data format","labels":["Error"],"data":[1],"color":"#dc2626"}';
-    END IF;
-    
-    -- Ensure insights is a valid JSON array
-    IF p_insights IS NOT NULL AND NOT JSON_EXISTS(p_insights, '$') THEN
-      p_insights := '["Error: Could not parse insights"]';
-    END IF;
-  END generate_chart_with_insights;
+
+    RETURN NULL;
+  END;
+
+BEGIN
+  IF p_chart_data IS NULL OR NOT has_json_path(p_chart_data, '$.labels') THEN
+    p_insights := '[]';
+    RETURN;
+  END IF;
+
+  SELECT JSON_VALUE(p_chart_data,'$.title' RETURNING VARCHAR2(4000) NULL ON ERROR NULL ON EMPTY),
+         JSON_VALUE(p_chart_data,'$.subtitle' RETURNING VARCHAR2(4000) NULL ON ERROR NULL ON EMPTY)
+    INTO l_chart_title, l_chart_sub
+    FROM dual;
+
+  l_prompt :=
+    'You are a senior business intelligence analyst. Review the chart data and write three to five concise insights.'||CHR(10)||
+    'Database schema: '||NVL(p_schema, 'default')||CHR(10)||
+    'Dashboard question: '||NVL(p_question, '(not provided)')||CHR(10)||
+    'SQL used for the chart:'||CHR(10)||NVL(DBMS_LOB.SUBSTR(p_sql_query, 4000, 1), '(missing)')||CHR(10)||
+    'Chart JSON:'||CHR(10)||NVL(DBMS_LOB.SUBSTR(p_chart_data, 6000, 1), '{}')||CHR(10)||
+    'Return JSON only with this structure:'||CHR(10)||
+    '{"insights":["insight 1","insight 2","insight 3"],"title":"optional improved title","subtitle":"optional improved subtitle"}.'||CHR(10)||
+    'Guidelines: base every insight on the supplied data, highlight comparisons or notable points, keep each insight under 120 characters, and never invent numbers.';
+
+  l_body := '{"model":"gpt-4o-mini",'||
+            '"response_format":{"type":"json_object"},'||
+            '"temperature":0.2,'||
+            '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
+
+  set_json_headers;
+  l_resp := APEX_WEB_SERVICE.make_rest_request(
+              p_url                  => 'https://api.openai.com/v1/chat/completions',
+              p_http_method          => 'POST',
+              p_body                 => l_body,
+              p_credential_static_id => 'credentials_for_ai_services');
+
+  IF APEX_WEB_SERVICE.g_status_code <> 200 THEN
+    p_insights := '[]';
+    RETURN;
+  END IF;
+
+  SELECT JSON_VALUE(l_resp, '$.choices[0].message.content' RETURNING CLOB NULL ON ERROR NULL ON EMPTY)
+    INTO v_txt
+    FROM dual;
+
+  IF v_txt IS NULL THEN
+    p_insights := '[]';
+    RETURN;
+  END IF;
+
+  SELECT JSON_QUERY(v_txt, '$.insights' RETURNING CLOB NULL ON ERROR NULL ON EMPTY)
+    INTO l_insights
+    FROM dual;
+
+  l_insights := ensure_array(l_insights);
+
+  IF l_insights IS NULL THEN
+    l_insights := ensure_array(v_txt);
+  END IF;
+
+  IF l_insights IS NULL THEN
+    BEGIN
+      SELECT JSON_ARRAYAGG(TRIM(REGEXP_REPLACE(column_value, '^[-•\s]+', '')) RETURNING CLOB)
+        INTO l_insights
+        FROM TABLE(apex_string.split(v_txt, CHR(10)))
+       WHERE TRIM(REGEXP_REPLACE(column_value, '^[-•\s]+', '')) IS NOT NULL;
+    EXCEPTION
+      WHEN OTHERS THEN
+        l_insights := NULL;
+    END;
+  END IF;
+
+  IF l_insights IS NULL OR l_insights = '[]' THEN
+    l_insights := '[]';
+  END IF;
+
+  p_insights := l_insights;
+END generate_chart_with_insights;
 
   ------------------------------------------------------------------------------
   -- REAL SQL QUERY GENERATOR: Generate actual SQL queries based on question
@@ -740,7 +750,7 @@ END plan_layout_and_blocks;
       '- For time series, format dates appropriately '||
       'Question: '||p_question;
 
-    l_body := '{"model":"gpt-4-turbo-preview",'||
+    l_body := '{"model":"gpt-4o-mini",'||
               '"response_format":{"type":"json_object"},'||
               '"temperature":0.2,'||
               '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
@@ -753,10 +763,9 @@ END plan_layout_and_blocks;
                 p_credential_static_id => 'credentials_for_ai_services');
 
     IF APEX_WEB_SERVICE.g_status_code <> 200 THEN
-      -- Fallback SQL query
-      p_sql_query := 'SELECT ''Sample Data'' as category, 100 as total FROM dual UNION ALL SELECT ''Category A'', 150 FROM dual UNION ALL SELECT ''Category B'', 200 FROM dual';
-      p_chart_config := '{"title":"Sample Chart","xColumn":"CATEGORY","yColumn":"TOTAL","chartType":"' || p_chart_type || '"}';
-      RETURN;
+      raise_application_error(-20001,
+        'SQL generation failed with status ' || APEX_WEB_SERVICE.g_status_code ||
+        '. Response: ' || NVL(DBMS_LOB.SUBSTR(l_resp, 4000, 1), '(empty)'));
     END IF;
 
     SELECT JSON_VALUE(l_resp,'$.choices[0].message.content' RETURNING CLOB NULL ON ERROR NULL ON EMPTY)
@@ -771,12 +780,14 @@ END plan_layout_and_blocks;
     END IF;
 
     -- Fallback if extraction failed
-    IF p_sql_query IS NULL OR LENGTH(p_sql_query) < 20 THEN
-      p_sql_query := 'SELECT ''Sample'' as label, 100 as value FROM dual UNION ALL SELECT ''Data'', 150 FROM dual';
+    IF p_sql_query IS NULL OR LENGTH(TRIM(p_sql_query)) < 20 THEN
+      raise_application_error(-20002, 'The AI response did not include a valid SQL query.');
     END IF;
-    
+
+    sanitize_sql(p_sql_query);
+
     IF p_chart_config IS NULL OR p_chart_config = '{}' THEN
-      p_chart_config := '{"title":"Generated Chart","xColumn":"LABEL","yColumn":"VALUE","chartType":"' || p_chart_type || '"}';
+      p_chart_config := '{}';
     END IF;
   END generate_real_sql_query;
 
@@ -788,7 +799,7 @@ END plan_layout_and_blocks;
   p_question      IN  VARCHAR2,
   p_dashboard_id  OUT NUMBER,
   p_reason_out    OUT CLOB,
-  p_model         IN  VARCHAR2  DEFAULT 'gpt-5-2025-08-07',
+  p_model         IN  VARCHAR2  DEFAULT 'gpt-4o-mini',
   p_max_widgets   IN  PLS_INTEGER DEFAULT 6
 ) IS
   l_owner     VARCHAR2(128) := UPPER(p_owner);

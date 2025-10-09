@@ -2,7 +2,7 @@
 -- Process Name: DASH_GEN_CHART
 
 DECLARE
-  v_dash_id      NUMBER := TO_NUMBER(:P3_DASH_ID);
+  v_dash_id      NUMBER := TO_NUMBER(NVL(NULLIF(:P3_DASH_ID, ''), NULLIF(APEX_APPLICATION.G_X01, '')));
   v_question     VARCHAR2(4000) := :P3_QUESTION;
   v_chart_data   CLOB;
   v_insights     CLOB;
@@ -11,6 +11,34 @@ DECLARE
   v_sql_query    CLOB;
   v_chart_config CLOB;
   l_out          CLOB;
+  TYPE t_label_tab IS TABLE OF VARCHAR2(4000) INDEX BY PLS_INTEGER;
+  TYPE t_value_tab IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
+
+  v_labels        t_label_tab;
+  v_values        t_value_tab;
+  v_point_count   PLS_INTEGER := 0;
+  v_cursor        INTEGER;
+  v_desc          DBMS_SQL.desc_tab2;
+  v_col_count     PLS_INTEGER;
+  v_label_value   VARCHAR2(4000);
+  v_value_text    VARCHAR2(4000);
+  v_value_number  NUMBER;
+  v_sql_x_col     VARCHAR2(4000);
+  v_sql_y_col     VARCHAR2(4000);
+  v_cfg_title     VARCHAR2(4000);
+  v_cfg_subtitle  VARCHAR2(4000);
+  v_cfg_color     VARCHAR2(64);
+  v_cfg_chart     VARCHAR2(100);
+  v_cfg_x_col     VARCHAR2(4000);
+  v_cfg_y_col     VARCHAR2(4000);
+  v_final_title   VARCHAR2(4000);
+  v_final_sub     VARCHAR2(4000);
+  v_final_color   VARCHAR2(64);
+  v_final_chart   VARCHAR2(100);
+  v_final_x_col   VARCHAR2(4000);
+  v_final_y_col   VARCHAR2(4000);
+  l_insights_ok   NUMBER := 0;
+  c_max_points    CONSTANT PLS_INTEGER := 50;
 
   PROCEDURE out_json(p CLOB) IS
     pos  PLS_INTEGER := 1;
@@ -48,32 +76,135 @@ BEGIN
   DBMS_OUTPUT.PUT_LINE('Chart SQL: ' || DBMS_LOB.SUBSTR(v_sql_query, 2000));
   DBMS_OUTPUT.PUT_LINE('Chart Config: ' || DBMS_LOB.SUBSTR(v_chart_config, 2000));
 
-  -- Ensure we have valid chart data
-  IF v_sql_query IS NULL OR LENGTH(v_sql_query) < 20 THEN
-    v_sql_query := 'SELECT ''Sample Category'' as category, 100 as value FROM dual UNION ALL SELECT ''Category A'', 150 FROM dual UNION ALL SELECT ''Category B'', 200 FROM dual';
+  -- Execute the generated SQL and build chart data from the actual result set
+  v_cursor := DBMS_SQL.open_cursor;
+  BEGIN
+    DBMS_SQL.parse(v_cursor, v_sql_query, DBMS_SQL.native);
+    DBMS_SQL.describe_columns2(v_cursor, v_col_count, v_desc);
+
+    IF v_col_count < 2 THEN
+      RAISE_APPLICATION_ERROR(-20003, 'Generated SQL must return at least two columns.');
+    END IF;
+
+    v_sql_x_col := NVL(v_desc(1).col_name, 'LABEL');
+    v_sql_y_col := NVL(v_desc(2).col_name, 'VALUE');
+
+    DBMS_SQL.define_column(v_cursor, 1, v_label_value, 4000);
+    DBMS_SQL.define_column(v_cursor, 2, v_value_text, 4000);
+
+    DBMS_SQL.execute(v_cursor);
+
+    LOOP
+      EXIT WHEN DBMS_SQL.fetch_rows(v_cursor) = 0 OR v_point_count >= c_max_points;
+
+      DBMS_SQL.column_value(v_cursor, 1, v_label_value);
+      DBMS_SQL.column_value(v_cursor, 2, v_value_text);
+
+      v_value_number := NULL;
+      IF v_value_text IS NOT NULL THEN
+        BEGIN
+          v_value_number := TO_NUMBER(REPLACE(TRIM(v_value_text), ',', ''));
+        EXCEPTION
+          WHEN VALUE_ERROR THEN
+            v_value_number := NULL;
+        END;
+      END IF;
+
+      IF v_label_value IS NOT NULL AND v_value_number IS NOT NULL THEN
+        v_point_count := v_point_count + 1;
+        v_labels(v_point_count) := v_label_value;
+        v_values(v_point_count) := v_value_number;
+      END IF;
+    END LOOP;
+
+    DBMS_SQL.close_cursor(v_cursor);
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF DBMS_SQL.is_open(v_cursor) THEN
+        DBMS_SQL.close_cursor(v_cursor);
+      END IF;
+      RAISE;
+  END;
+
+  IF v_point_count = 0 THEN
+    RAISE_APPLICATION_ERROR(-20004, 'Generated SQL returned no numeric rows to chart.');
   END IF;
 
-  IF v_chart_config IS NULL OR v_chart_config = '{}' THEN
-    v_chart_config := '{"title":"Sample Chart","xColumn":"CATEGORY","yColumn":"VALUE","chartType":"BAR"}';
-  END IF;
+  -- Read any optional presentation settings from the AI config
+  SELECT JSON_VALUE(v_chart_config, '$.title'     RETURNING VARCHAR2(4000) NULL ON ERROR NULL ON EMPTY),
+         JSON_VALUE(v_chart_config, '$.subtitle' RETURNING VARCHAR2(4000) NULL ON ERROR NULL ON EMPTY),
+         JSON_VALUE(v_chart_config, '$.color'    RETURNING VARCHAR2(64)   NULL ON ERROR NULL ON EMPTY),
+         JSON_VALUE(v_chart_config, '$.chartType' RETURNING VARCHAR2(100) NULL ON ERROR NULL ON EMPTY),
+         JSON_VALUE(v_chart_config, '$.xColumn'  RETURNING VARCHAR2(4000) NULL ON ERROR NULL ON EMPTY),
+         JSON_VALUE(v_chart_config, '$.yColumn'  RETURNING VARCHAR2(4000) NULL ON ERROR NULL ON EMPTY)
+    INTO v_cfg_title, v_cfg_subtitle, v_cfg_color, v_cfg_chart, v_cfg_x_col, v_cfg_y_col
+    FROM dual;
 
-  -- Generate insights using AI
+  v_final_title := NVL(v_cfg_title, SUBSTR(REPLACE(NVL(v_question, 'AI Chart'), '"', ''), 1, 200));
+  v_final_sub   := NVL(v_cfg_subtitle, '');
+  v_final_color := NVL(v_cfg_color, '#2563eb');
+  v_final_chart := NVL(v_cfg_chart, 'BAR');
+  v_final_x_col := NVL(v_cfg_x_col, v_sql_x_col);
+  v_final_y_col := NVL(v_cfg_y_col, v_sql_y_col);
+
+  -- Build chart data JSON
+  apex_json.initialize_clob_output;
+  apex_json.open_object;
+    apex_json.write('title', v_final_title);
+    apex_json.write('subtitle', v_final_sub);
+    apex_json.open_array('labels');
+      FOR i IN 1..v_point_count LOOP
+        apex_json.write(v_labels(i));
+      END LOOP;
+    apex_json.close_array;
+    apex_json.open_array('data');
+      FOR i IN 1..v_point_count LOOP
+        apex_json.write(v_values(i));
+      END LOOP;
+    apex_json.close_array;
+    apex_json.write('color', v_final_color);
+  apex_json.close_object;
+  v_chart_data := apex_json.get_clob_output; apex_json.free_output;
+
+  -- Build chart configuration JSON
+  apex_json.initialize_clob_output;
+  apex_json.open_object;
+    apex_json.write('title', v_final_title);
+    apex_json.write('xColumn', v_final_x_col);
+    apex_json.write('yColumn', v_final_y_col);
+    apex_json.write('chartType', v_final_chart);
+    apex_json.write('color', v_final_color);
+  apex_json.close_object;
+  v_chart_config := apex_json.get_clob_output; apex_json.free_output;
+
+  -- Generate insights using AI based on the real data
   myquery_dashboard_ai_pkg.generate_chart_with_insights(
     p_question   => v_question,
+    p_sql_query  => v_sql_query,
     p_chart_data => v_chart_data,
     p_insights   => v_insights,
     p_schema     => :P0_DATABASE_SCHEMA
   );
 
-  -- Ensure we have valid chart data and insights
-  IF v_chart_data IS NULL OR v_chart_data = '{}' THEN
-    v_chart_data := '{"title":"Sample Chart","subtitle":"Sample data for demonstration","labels":["Jan","Feb","Mar","Apr","May","Jun"],"data":[120,190,300,500,200,300],"color":"#3b82f6"}';
-  END IF;
+  -- Validate insights JSON (allow empty array)
+  IF v_insights IS NULL THEN
+    v_insights := '[]';
+  ELSE
+    BEGIN
+      SELECT CASE WHEN JSON_EXISTS(v_insights, '$[*]') THEN 1 ELSE 0 END
+        INTO l_insights_ok
+        FROM dual;
+    EXCEPTION
+      WHEN OTHERS THEN
+        l_insights_ok := 0;
+    END;
 
-  IF v_insights IS NULL OR v_insights = '[]' THEN
-    v_insights := '["This is sample insight data","The chart shows sample data points","Peak values indicate trends","Data is for demonstration purposes"]';
+    IF l_insights_ok = 0 THEN
+      v_insights := '[]';
+    END IF;
   END IF;
   DBMS_OUTPUT.PUT_LINE('SQL Query generated: ' || DBMS_LOB.SUBSTR(v_sql_query, 300, 1));
+  DBMS_OUTPUT.PUT_LINE('Chart rows fetched: ' || v_point_count);
   DBMS_OUTPUT.PUT_LINE('Chart config: ' || DBMS_LOB.SUBSTR(v_chart_config, 200, 1));
   DBMS_OUTPUT.PUT_LINE('Insights generated: ' || DBMS_LOB.SUBSTR(v_insights, 500, 1));
 

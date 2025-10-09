@@ -1,5 +1,5 @@
 -- AJAX callback Process in Oracle APEX Page
--- DASH_CREATE_BLOCKS
+-- Process Name:DASH_CREATE_BLOCKS
 
 
 DECLARE

@@ -1,7 +1,7 @@
 -- AJAX Callback Process in Oracle APEX Page
 -- Process Name: GET_DASH_META
 DECLARE
-  v_dash_id        NUMBER := TO_NUMBER(:P3_DASH_ID);
+  v_dash_id        NUMBER := TO_NUMBER(NVL(NULLIF(:P3_DASH_ID, ''), NULLIF(apex_application.g_x01, '')));
   v_title          VARCHAR2(1000);
   v_subtitle       CLOB;  -- Small description under title
   v_overview       CLOB;  -- Overview section text
@@ -11,6 +11,19 @@ DECLARE
   v_chart_insights CLOB;  -- Chart insights
   v_out            CLOB;
 BEGIN
+  IF v_dash_id IS NULL THEN
+    apex_json.initialize_clob_output;
+    apex_json.open_object;
+    apex_json.write('ok', false);
+    apex_json.write('error', 'P3_DASH_ID is NULL');
+    apex_json.close_object;
+    v_out := apex_json.get_clob_output; apex_json.free_output;
+    owa_util.mime_header('application/json', FALSE);
+    owa_util.http_header_close;
+    htp.prn(v_out);
+    RETURN;
+  END IF;
+
   -- Dashboard title and subtitle/description
   SELECT NAME, DESCRIPTION
     INTO v_title, v_subtitle
@@ -114,9 +127,21 @@ BEGIN
     apex_json.write('subtitle', NVL(v_subtitle, ''));
     apex_json.write('overview', NVL(v_overview, ''));
     apex_json.write('insights', NVL(v_insights, ''));
-    apex_json.write('kpis', NVL(v_kpis, '{"kpis":[]}'));
-    apex_json.write('chartData', NVL(v_chart_data, '{}'));
-    apex_json.write('chartInsights', NVL(v_chart_insights, '[]'));
+    IF v_kpis IS NOT NULL THEN
+      apex_json.write('kpis', v_kpis);
+    ELSE
+      apex_json.write_null('kpis');
+    END IF;
+    IF v_chart_data IS NOT NULL THEN
+      apex_json.write('chartData', v_chart_data);
+    ELSE
+      apex_json.write_null('chartData');
+    END IF;
+    IF v_chart_insights IS NOT NULL THEN
+      apex_json.write('chartInsights', v_chart_insights);
+    ELSE
+      apex_json.write_null('chartInsights');
+    END IF;
   apex_json.close_object;
   v_out := apex_json.get_clob_output; apex_json.free_output;
   owa_util.mime_header('application/json', FALSE);

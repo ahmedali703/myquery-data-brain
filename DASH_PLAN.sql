@@ -26,7 +26,7 @@ BEGIN
     p_question    => :P3_QUESTION,
     p_plan_json   => v_plan,
     p_schema      => :P0_DATABASE_SCHEMA,
-    p_model       => 'gpt-5-2025-08-07',
+    p_model       => 'gpt-4o-mini',
     p_max_widgets => 6
   );
 

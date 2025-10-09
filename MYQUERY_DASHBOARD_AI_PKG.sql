@@ -583,6 +583,10 @@ PROCEDURE generate_chart_with_insights(
     SELECT CASE WHEN JSON_EXISTS(p_json, p_path) THEN 1 ELSE 0 END
       INTO l_flag
       FROM dual;
+    l_body := '{"model":"gpt-4o-mini",'||
+              '"response_format":{"type":"json_object"},'||
+              '"temperature":0.3,'||
+              '"messages":[{"role":"user","content":"'||json_escape(l_prompt)||'"}]}';
 
     RETURN l_flag = 1;
   EXCEPTION

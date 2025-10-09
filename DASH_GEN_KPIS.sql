@@ -2,7 +2,7 @@
 -- Process Name: DASH_GEN_KPIS
 
 DECLARE
-  v_dash_id     NUMBER := TO_NUMBER(:P3_DASH_ID);
+  v_dash_id     NUMBER := TO_NUMBER(NVL(NULLIF(:P3_DASH_ID, ''), NULLIF(APEX_APPLICATION.G_X01, '')));
   v_question    VARCHAR2(4000) := :P3_QUESTION;
   v_kpis_json   CLOB;
   v_kpi_id      NUMBER;
@@ -43,9 +43,8 @@ BEGIN
 
   -- Ensure we have valid KPI JSON
   IF v_kpis_json IS NULL OR v_kpis_json = '{"kpis":[]}' OR (v_kpis_json IS NOT NULL AND JSON_VALUE(v_kpis_json, '$.kpis.length()') = 0) THEN
-    -- Create fallback KPIs if AI generation failed or returned empty
-    v_kpis_json := '{"kpis":[{"title":"Total Records","value":"1,250","unit":"","icon":"📊","color":"#2563eb"},{"title":"Active Users","value":"89","unit":"","icon":"👥","color":"#059669"},{"title":"Performance Score","value":"94.2","unit":"%","icon":"🎯","color":"#7c3aed"}]}';
-    DBMS_OUTPUT.PUT_LINE('Using fallback KPIs due to empty AI response');
+    v_kpis_json := '{"kpis":[]}';
+    DBMS_OUTPUT.PUT_LINE('AI returned no KPI definitions.');
   END IF;
 
   -- Execute each KPI SQL query and replace with real values

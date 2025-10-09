@@ -4,7 +4,7 @@
 
 
 DECLARE
-  v_dash_id        NUMBER := TO_NUMBER(:P3_DASH_ID);
+  v_dash_id        NUMBER := TO_NUMBER(NVL(NULLIF(:P3_DASH_ID, ''), NULLIF(APEX_APPLICATION.G_X01, '')));
   v_done           NUMBER := 0;
   v_total          NUMBER := 0;
   l_out            CLOB;

@@ -2,7 +2,7 @@
 -- Process Name: DASH_GEN_SUMMARY
 
 DECLARE
-  v_dash_id      NUMBER := TO_NUMBER(:P3_DASH_ID);
+  v_dash_id      NUMBER := TO_NUMBER(NVL(NULLIF(:P3_DASH_ID, ''), NULLIF(APEX_APPLICATION.G_X01, '')));
   v_widgets_json CLOB;
   v_summary      CLOB;
   v_sum_wid      NUMBER;

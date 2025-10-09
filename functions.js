@@ -46,6 +46,20 @@
       delete payload.pageItems;
     }
 
+    if (payload.x01 === undefined && window.apex && typeof apex.item === 'function') {
+      try {
+        const dashItem = apex.item(ITEM_DASH_ID);
+        if (dashItem) {
+          const dashValue = dashItem.getValue();
+          if (dashValue !== null && dashValue !== undefined && String(dashValue).trim() !== '') {
+            payload.x01 = dashValue;
+          }
+        }
+      } catch (e) {
+        console.debug('Unable to attach dashboard id to request payload', e);
+      }
+    }
+
     return apex.server.process(name, payload, options);
   }
 
@@ -346,29 +360,8 @@
     } catch (e) {
       console.warn('Chart data parsing error:', e);
       console.log('Raw meta:', meta);
-      
-      // Fallback data
-      chartData = {
-        title: meta.title || "Sample Chart",
-        subtitle: meta.subtitle || "Sample data for demonstration",
-        labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-        data: [120, 190, 300, 500, 200, 300],
-        color: "#3b82f6"
-      };
-      
-      insightsData = [
-        "This is sample insight data",
-        "The chart shows sample data points",
-        "Peak values indicate trends",
-        "Data is for demonstration purposes",
-        "Check console for detailed error info"
-      ];
-      
-      if (e instanceof SyntaxError) {
-        console.error('JSON parsing error in chart data');
-      } else {
-        console.error('Error processing chart data:', e);
-      }
+      chartData = null;
+      insightsData = [];
     }
 
     // More detailed validation with better error reporting
@@ -381,17 +374,6 @@
                          Array.isArray(chartData.data) && 
                          chartData.data.length > 0;
                          
-    if (!hasValidChart) {
-      console.warn('No valid chart data available. ChartData:', chartData);
-      // Ensure we have at least some data to display
-      chartData = chartData || {};
-      chartData.labels = chartData.labels || ["Jan", "Feb", "Mar"];
-      chartData.data = chartData.data || [100, 200, 150];
-      chartData.title = chartData.title || "Sample Chart";
-      chartData.subtitle = chartData.subtitle || "Sample data";
-      chartData.color = chartData.color || "#3b82f6";
-    }
-
     if (!hasValidChart) {
       console.warn('No valid chart data available. ChartData:', chartData);
       // Show placeholder chart section
@@ -416,8 +398,9 @@ insights exists: ${!!meta.chartInsights}
 insights type: ${typeof meta.chartInsights}
 insights content: ${JSON.stringify(meta.chartInsights, null, 2).substring(0, 200)}...
 
-parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
+parsed chartData: ${chartData ? JSON.stringify(chartData, null, 2).substring(0, 200) : 'null'}
           </pre>
+          <p style="font-size: 12px;">Ensure the dashboard SQL returns numeric data, then run generation again.</p>
         </div>
       `;
       return;
@@ -433,6 +416,8 @@ parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
       region.parentElement?.insertBefore(chartContainer, region);
     }
 
+    const insightsList = insightsData.length ? insightsData : ['No insights available yet.'];
+
     chartContainer.innerHTML = `
       <div style="flex: 1; padding: 20px; background: white; border-radius: 12px 0 0 12px;">
         <h3 style="margin: 0 0 4px; font: 600 18px/1.4 system-ui;">${chartData.title || 'Chart'}</h3>
@@ -445,7 +430,7 @@ parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
         <h3 style="margin: 0 0 4px; font: 600 18px/1.4 system-ui;">Key Insights</h3>
         <p style="margin: 0 0 16px; font: 14px/1.4 system-ui; color: #6b7280;">${chartData.title || ''}</p>
         <ul style="margin: 0; padding: 0; list-style: none;">
-          ${insightsData.map(insight => `
+          ${insightsList.map(insight => `
             <li style="margin: 0 0 12px; padding: 0; font: 14px/1.5 system-ui; color: #374151; position: relative; padding-left: 8px;">
               <span style="position: absolute; left: -8px; top: 0; color: #6b7280;">•</span>
               ${insight}
@@ -522,7 +507,7 @@ parsed chartData: ${JSON.stringify(chartData, null, 2).substring(0, 200)}...
       if (!createRes || createRes.ok !== true) throw new Error((createRes && createRes.error) || 'Create failed.');
       dashId = createRes.dashboardId || apex.item(ITEM_DASH_ID).getValue();
       if (!dashId) throw new Error('No dashboardId returned.');
-      apex.item(ITEM_DASH_ID).setValue(String(dashId));
+      apex.item(ITEM_DASH_ID).setValue(String(dashId), null, true);
     } catch (e) { apex.message.showErrors([{type:'error',location:'page',message:e.message}]); finishProgress(false, 'Failed at Creating'); return; }
 
     // 3) KPIs (AI-generated KPI blocks)

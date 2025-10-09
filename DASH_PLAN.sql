@@ -1,5 +1,5 @@
-// Ajax Callback in Oracle APEX
-//DASH_PLAN
+-- Ajax Callback in Oracle APEX
+-- DASH_PLAN
 
 DECLARE
   v_plan    CLOB;
